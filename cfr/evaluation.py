@@ -352,8 +352,12 @@ def evaluate(output_dir, data_path_train, data_path_test=None, binary=False):
     else:
         data_test = None
 
-
-
+    print "this:"
+    print np.shape(data_train['mu1'])
+    # for i in range(100):
+    #     print sum(data_train['mu1'][:,i])+sum(data_test['mu1'][:,i])
+        # print (sum(data_train['mu1'][:,i]-data_train['mu0'][:,i])+sum(data_test['mu1'][:,i]-data_test['mu0'][:,i])) / (np.shape(data_train['mu1'][:,i])[0]+np.shape(data_test['mu1'][:,i])[0])
+        # exit()
     # Evaluate all results
     eval_results = []
     configs_out = []

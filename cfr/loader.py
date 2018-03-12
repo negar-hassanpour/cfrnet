@@ -129,6 +129,28 @@ def load_data(datapath):
         print 'Couldn\'t find ground truth. Proceeding...'
         ycfs = None; mu0s = None; mu1s = None
 
+    # import csv
+    # with open('tt.csv', 'wb') as csvfile:
+    #     writer = csv.writer(csvfile)
+    #     writer.writerows(ts)
+    # with open('yf.csv', 'wb') as csvfile:
+    #     writer = csv.writer(csvfile)
+    #     writer.writerows(yfs)
+
+    # i = 10
+    # j = 21
+    # print yfs[i,j], ycfs[i,j], ts[i,j], mu1s[i,j], mu0s[i,j]
+    # exit()
+
+    # ate_trn=[]
+    # ateHat_trn=[]
+    # for exp in range(100):
+    #     ate_trn.append(np.mean(mu1s[:,exp] - mu0s[:,exp]))
+    #     ateHat_trn.append(np.sum(np.multiply(yfs[:,exp], ts[:,exp]))/np.sum(ts[:,exp]) - np.sum(np.multiply(yfs[:,exp], 1-ts[:,exp]))/np.sum(1-ts[:,exp]))
+    # print np.mean(ate_trn), np.std(ate_trn)
+    # print np.mean(ateHat_trn), np.std(ateHat_trn)
+    # print ate
+    
     data = {'x':xs, 't':ts, 'e':es, 'yf':yfs, 'ycf':ycfs, \
             'mu0':mu0s, 'mu1':mu1s, 'ate':ate, 'YMUL': ymul, \
             'YADD': yadd, 'ATE': ate.tolist(), 'HAVE_TRUTH': HAVE_TRUTH, \

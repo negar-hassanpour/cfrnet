@@ -8,7 +8,7 @@ import traceback
 
 import time
 
-import cfr.cfr_net as cfr
+import cfr.cfr_net_weighted as cfr
 from cfr.util import *
 
 ''' Define parameter flags '''
@@ -66,7 +66,7 @@ __DEBUG__ = False
 if FLAGS.debug:
     __DEBUG__ = True
 
-def train(CFR, sess, train_step, D, I_valid, D_test, logfile, i_exp):
+def train(CFR, sess, propensity_step, train_step, D, I_valid, D_test, logfile, i_exp):
     """ Trains a CFR model on supplied data """
 
     ''' Train/validation split '''
@@ -135,9 +135,17 @@ def train(CFR, sess, train_step, D, I_valid, D_test, logfile, i_exp):
 
         ''' Do one step of gradient descent '''
         if not objnan:
-            sess.run(train_step, feed_dict={CFR.x: x_batch, CFR.t: t_batch, \
+            dict_factual_batch = {CFR.x: x_batch, CFR.t: t_batch, \
                 CFR.y_: y_batch, CFR.do_in: FLAGS.dropout_in, CFR.do_out: FLAGS.dropout_out, \
-                CFR.r_alpha: FLAGS.p_alpha, CFR.r_lambda: FLAGS.p_lambda, CFR.p_t: p_treated})
+                CFR.r_alpha: FLAGS.p_alpha, CFR.r_lambda: FLAGS.p_lambda, CFR.p_t: p_treated}
+            
+            sess.run(train_step, feed_dict=dict_factual_batch)
+            # tf.variables_initializer([CFR.W, CFR.b])
+            sess.run(propensity_step, feed_dict=dict_factual_batch)
+            # sample_weight = sess.run(CFR.sample_weight, feed_dict=dict_factual_batch)
+            # print i
+            # print np.transpose(sample_weight)
+            # exit()
 
         ''' Project variable selection weights '''
         if FLAGS.varsel:
@@ -147,6 +155,7 @@ def train(CFR, sess, train_step, D, I_valid, D_test, logfile, i_exp):
         ''' Compute loss every N iterations '''
         if i % FLAGS.output_delay == 0 or i==FLAGS.iterations-1:
             elapsed_time = time.time() - start_time
+
             obj_loss,f_error,imb_err = sess.run([CFR.tot_loss, CFR.pred_loss, CFR.imb_dist],
                 feed_dict=dict_factual)
 
@@ -177,7 +186,7 @@ def train(CFR, sess, train_step, D, I_valid, D_test, logfile, i_exp):
             if np.isnan(obj_loss):
                 log(logfile,'Experiment %d: Objective is NaN. Skipping.' % i_exp)
                 objnan = True
-            
+
             start_time = time.time()
 
         ''' Compute predictions every M iterations '''
@@ -302,7 +311,15 @@ def run(outdir):
     #capped_gvs = [(tf.clip_by_value(grad, -1.0, 1.0), var) for grad, var in gvs]
     #train_step = opt.apply_gradients(capped_gvs, global_step=global_step)
 
-    train_step = opt.minimize(CFR.tot_loss,global_step=global_step)
+    learning_rate = 0.01
+    propensity_opt = tf.train.GradientDescentOptimizer(learning_rate)
+    propensity_step = propensity_opt.minimize(CFR.cost, global_step=global_step, var_list=[CFR.W, CFR.b])
+
+    var_list = CFR.weights_in
+    var_list.extend(CFR.weights_out)
+    var_list.extend(CFR.biases_in)
+    var_list.extend(CFR.biases_out)
+    train_step = opt.minimize(CFR.tot_loss, global_step=global_step, var_list=var_list)
 
     ''' Set up for saving variables '''
     all_losses = []
@@ -370,7 +387,7 @@ def run(outdir):
 
         ''' Run training loop '''
         losses, preds_train, preds_test, reps, reps_test = \
-            train(CFR, sess, train_step, D_exp, I_valid, \
+            train(CFR, sess, propensity_step, train_step, D_exp, I_valid, \
                 D_exp_test, logfile, i_exp)
 
         ''' Collect all reps '''
