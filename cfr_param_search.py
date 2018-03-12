@@ -49,7 +49,7 @@ def save_used_cfg(cfg, used_cfg_file):
         cfg_str = cfg_string(cfg)
         f.write('%s\n' % cfg_str)
 
-def run(cfg_file, num_runs, mode):
+def run(cfg_file, num_runs):
     configs = load_config(cfg_file)
 
     outdir = configs['outdir'][0]
@@ -73,10 +73,10 @@ def run(cfg_file, num_runs, mode):
         print '\n'.join(['%s: %s' % (str(k), str(v)) for k,v in cfg.iteritems() if len(configs[k])>1])
 
         flags = ' '.join('--%s %s' % (k,str(v)) for k,v in cfg.iteritems())
-        call('python cfr_net_'+mode+'train.py %s' % flags, shell=True)
+        call('python cfr_net_'+cfg['mode']+'train.py %s' % flags, shell=True)
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print 'Usage: python cfr_param_search.py <config file> <num runs>'
     else:
-        run(sys.argv[1], int(sys.argv[2]), sys.argv[3])
+        run(sys.argv[1], int(sys.argv[2]))
