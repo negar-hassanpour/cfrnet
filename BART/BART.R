@@ -7,6 +7,7 @@ BART <- function(curr_dir, data_name){
 		
 	# read data
 	x 		= as.matrix( read.csv( paste( c(curr_dir,"temp/",data_name,"_x.csv"),  collapse="" ), header = FALSE ) )
+	x_tst 	= as.matrix( read.csv( paste( c(curr_dir,"temp/",data_name,"_x_tst.csv"),  collapse="" ), header = FALSE ) )
 	y 		= as.matrix( read.csv( paste( c(curr_dir,"temp/",data_name,"_y.csv"),  collapse="" ), header = FALSE ) )
 	t 		= as.matrix( read.csv( paste( c(curr_dir,"temp/",data_name,"_t.csv"),  collapse="" ), header = FALSE ) )
 	IDs		= as.matrix( read.csv( paste( c(curr_dir,"temp/",data_name,"_id.csv"), collapse="" ), header = FALSE ) )
@@ -14,13 +15,13 @@ BART <- function(curr_dir, data_name){
 	idx0 = t == 0
 	idx1 = t == 1
 
-	yhat = matrix(, nrow = nrow(x), ncol = 3)
+	yhat = matrix(, nrow = length(IDs), ncol = 3)
 	yhat[,1] = IDs
 
-	fit = bart(x[idx0,],y[idx0], x, ntree)
+	fit = bart(x[idx0,],y[idx0], x_tst, ntree)
 	yhat[,2] = fit$yhat.test.mean
 
-	fit = bart(x[idx1,],y[idx1], x, ntree)
+	fit = bart(x[idx1,],y[idx1], x_tst, ntree)
 	yhat[,3] = fit$yhat.test.mean
 
 	filename = paste( c(curr_dir,"/results/BART/",data_name,".csv"), collapse="" )
