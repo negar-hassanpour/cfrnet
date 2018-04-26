@@ -151,8 +151,10 @@ class cfr_net(object):
             # w_c = (1-t)/(2*(1-p_t))
             # sample_weight = w_t + w_c
             
-            # sample_weight = 0.5 / pi_0
-            sample_weight = 0.5 * ( 1. + (1.-pi_0)/pi_0 * (p_t/(1-p_t))**(2*t-1) )
+            if FLAGS.mode == '1.0':
+                sample_weight = 0.5 / pi_0
+            else:
+                sample_weight = 0.5 * ( 1. + (1.-pi_0)/pi_0 * (p_t/(1-p_t))**(2*t-1) )
         else:
             sample_weight = 1.0
 

@@ -6,6 +6,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 from loader import *
+import util
 
 LINE_WIDTH = 2
 FONTSIZE_LGND = 8
@@ -13,10 +14,10 @@ FONTSIZE = 16
 
 EARLY_STOP_SET_CONT = 'valid'
 EARLY_STOP_CRITERION_CONT = 'objective'
-CONFIG_CHOICE_SET_CONT = 'valid'
-CONFIG_CRITERION_CONT = 'pehe_nn'
-CORR_CRITERION_CONT = 'pehe'
-CORR_CHOICE_SET_CONT = 'test'
+CONFIG_CHOICE_SET_CONT = 'train'
+CONFIG_CRITERION_CONT = ['ENoRMSE_bart', 'ENoRMSE_m0']
+CORR_CHOICE_SET_CONT = 'train'
+CORR_CRITERION_CONT = 'ENoRMSE_bart'#'pehe'#
 
 EARLY_STOP_SET_BIN = 'valid'
 EARLY_STOP_CRITERION_BIN = 'policy_risk'
@@ -66,14 +67,14 @@ def cap(s):
 
 def table_str_bin(result_set, row_labels, labels_long=None, binary=False):
     if binary:
-        cols = ['policy_risk', 'bias_att', 'err_fact', 'objective', 'pehe_nn']
+        cols = ['policy_risk', 'bias_att', 'err_fact', 'pehe_nn', 'objective']
     else:
-        cols = ['pehe', 'bias_ate', 'rmse_fact', 'rmse_ite', 'objective', 'pehe_nn']
+        cols = ['pehe', 'ENoRMSE', 'bias_ate', 'rmse_ite', 'ENoRMSE_nn', 'ENoRMSE_bart', 'ENoRMSE_m0', 'ENoRMSE_nn_phi', 'policy_value', 'rmse_fact', 'imbalance', 'objective']
 
     cols = [c for c in cols if c in result_set[0]]
 
     head = [cap(c) for c in cols]
-    colw = np.max([16, np.max([len(h)+1 for h in head])])
+    colw = np.max([np.max([len(h)+1 for h in head])])
     col1w = np.max([len(h)+1 for h in row_labels])
 
     def rpad(s):
@@ -88,9 +89,16 @@ def table_str_bin(result_set, row_labels, labels_long=None, binary=False):
     s = head_str + '\n' + '-'*len(head_str) + '\n'
 
     for i in range(len(result_set)):
-        vals = [np.mean(np.abs(result_set[i][c])) for c in cols] # @TODO: np.abs just to make err not bias. change!
-        stds = [np.std(result_set[i][c])/np.sqrt(result_set[i][c].shape[0]) for c in cols]
-        val_pad = [r1pad(row_labels[i])] + [rpad('%.3f +/- %.3f ' % (vals[j], stds[j])) for j in range(len(vals))]
+        vals = []
+        for c in cols:
+            if c in ['bias_ate']:
+                vals.append(np.mean(result_set[i][c]))
+            else:
+                vals.append(np.sqrt(np.mean(np.square(result_set[i][c]))))
+        # vals = [np.mean((result_set[i][c])) for c in cols] # @TODO: np.abs just to make err not bias. change! -> removed np.abs to match IBM
+        # stds = [np.std((result_set[i][c]))/np.sqrt(result_set[i][c].shape[0]) for c in cols]  # NH: added abs to std too -> removed np.abs
+        # val_pad = [r1pad(row_labels[i])] + [rpad('%.3f +/- %.3f ' % (vals[j], stds[j])) for j in range(len(vals))]
+        val_pad = [r1pad(row_labels[i])] + [rpad('%.3f ' % vals[j]) for j in range(len(vals))]
         val_str = '| '.join(val_pad)
 
         if labels_long is not None:
@@ -102,15 +110,14 @@ def table_str_bin(result_set, row_labels, labels_long=None, binary=False):
 
 def evaluation_summary(result_set, row_labels, output_dir, labels_long=None, binary=False):
     s = ''
-    for i in ['train', 'valid', 'test']:
+    for i in ['train', 'valid']:#, 'test']:
         s += 'Mode: %s\n' % cap(i)
         s += table_str_bin([results[i] for results in result_set], row_labels, labels_long, binary)
         s += '\n'
 
     return s
 
-def select_parameters(results, configs, stop_set, stop_criterion, choice_set, choice_criterion):
-
+def select_parameters(results, configs, stop_set, stop_criterion, choice_set, choice_criteria):
     if stop_criterion == 'objective' and 'objective' not in results[stop_set]:
         if 'err_fact' in results[stop_set]:
             stop_criterion = 'err_fact'
@@ -120,23 +127,31 @@ def select_parameters(results, configs, stop_set, stop_criterion, choice_set, ch
     ''' Select early stopping for each repetition '''
     n_exp = results[stop_set][stop_criterion].shape[1]
     i_sel = np.argmin(results[stop_set][stop_criterion],2)
+
     results_sel = {'train': {}, 'valid': {}, 'test': {}}
 
     for k in results['valid'].keys():
         # To reduce dimension
-        results_sel['train'][k] = np.sum(results['train'][k],2)
-        results_sel['valid'][k] = np.sum(results['valid'][k],2)
+        # just to create the matrices; it will get replaced by values from i_sel
+        available = False
+        # if None not in results['train'][k][0][0]:
+        if all(elem is not None for elem in results['train'][k][0][0]):
+            available = True
+            results_sel['train'][k] = np.sum(results['train'][k],2)
+            results_sel['valid'][k] = np.sum(results['valid'][k],2)
 
         if k in results['test']:
-            results_sel['test'][k] = np.sum(results['test'][k],2)
+            if results['test'][k][0][0][0] != None: 
+                results_sel['test'][k] = np.sum(results['test'][k],2)
 
-        for ic in range(len(configs)):
-            for ie in range(n_exp):
-                results_sel['train'][k][ic,ie,] = results['train'][k][ic,ie,i_sel[ic,ie],]
-                results_sel['valid'][k][ic,ie,] = results['valid'][k][ic,ie,i_sel[ic,ie],]
+        if available == True:
+            for ic in range(len(configs)):
+                for ie in range(n_exp):
+                    results_sel['train'][k][ic,ie,] = results['train'][k][ic,ie,i_sel[ic,ie],]
+                    results_sel['valid'][k][ic,ie,] = results['valid'][k][ic,ie,i_sel[ic,ie],]
 
-                if k in results['test']:
-                    results_sel['test'][k][ic,ie,] = results['test'][k][ic,ie,i_sel[ic,ie],]
+                    if k in results['test']:
+                        results_sel['test'][k][ic,ie,] = results['test'][k][ic,ie,i_sel[ic,ie],]
 
     print 'Early stopping:'
     print np.mean(i_sel,1)
@@ -147,12 +162,24 @@ def select_parameters(results, configs, stop_set, stop_criterion, choice_set, ch
 
     labels = ['%d' % i for i in range(len(configs))]
 
-    sort_key = np.argsort([np.mean(r[choice_set][choice_criterion]) for r in results_all])
+    # sort_key = np.argsort([np.mean(r[choice_set][choice_criterion]) for r in results_all])
+
+    # sort_key_all = []
+    # for choice_criterion in choice_criteria:
+    #     sort_key_all.append( np.argsort( [np.sqrt(np.mean(np.square(r[choice_set][choice_criterion]))) for r in results_all] ) )
+    # sort_key = np.argsort(np.sum(sort_key_all, axis=0))
+
+    criteria_value = []
+    for choice_criterion in choice_criteria:
+        criteria_value.append( [np.sqrt(np.mean(np.square(r[choice_set][choice_criterion]))) for r in results_all] )
+        criteria_value[-1] /= np.min(criteria_value[-1])
+    sort_key = np.argsort(np.sum(criteria_value, axis=0))
+
     results_all = [results_all[i] for i in sort_key]
     configs_all = [configs[i] for i in sort_key]
     labels = [labels[i] for i in sort_key]
 
-    return results_all, configs_all, labels, sort_key
+    return results_all, configs_all, labels, sort_key, i_sel
 
 def plot_option_correlation(output_dir, diff_opts, results, configs,
         choice_set, choice_criterion, filter_str=''):
@@ -210,10 +237,12 @@ def plot_option_correlation(output_dir, diff_opts, results, configs,
         plt.savefig('%s/opt.%s.%s.%s.pdf' % (opts_dir, choice_set, choice_criterion, k))
         plt.close()
 
-def plot_evaluation_cont(results, configs, output_dir, data_train_path, data_test_path, filters=None):
-
-    data_train = load_data(data_train_path)
-    data_test = load_data(data_test_path)
+def plot_evaluation_cont(results, configs, exp_dirs, output_dir, data_train_path, data_test_path, filters=None):
+    data_train = util.load_data(data_train_path)
+    if data_test_path is not None:
+        data_test = util.load_data(data_test_path)
+    else:
+        data_test = data_train
 
     propensity = {}
     propensity['train'] = np.mean(data_train['t'])
@@ -232,18 +261,39 @@ def plot_evaluation_cont(results, configs, output_dir, data_train_path, data_tes
 
         results = dict([(s,dict([(k,results[s][k][I,]) for k in results[s].keys()])) for s in ['train', 'valid', 'test']])
         configs = [configs[i] for i in I]
+        exp_dirs = [exp_dirs[i] for i in I]
 
     ''' Do parameter selection and early stopping '''
-    results_all, configs_all, labels, sort_key = select_parameters(results,
+    results_all, configs_all, labels, sort_key, i_sel = select_parameters(results,
         configs, EARLY_STOP_SET_CONT, EARLY_STOP_CRITERION_CONT,
         CONFIG_CHOICE_SET_CONT, CONFIG_CRITERION_CONT)
+    
+    feat = []
+    for result in results_all:
+        feat.append([result['train']['ENoRMSE'][0], result['train']['ENoRMSE_bart'][0], result['train']['rmse_fact'][0]])
+    np.savez(output_dir+'/feat.npz',feat)
 
     ''' Save sorted configurations by parameters that differ '''
-    diff_opts = sorted([k for k in configs[0] if len(set([cfg[k] for cfg in configs]))>1])
-    labels_long = [', '.join(['%s=%s' % (k,str(configs[i][k])) for k in diff_opts]) for i in sort_key]
+    diff_opts = sorted([k for k in configs_all[0] if len(set([cfg[k] for cfg in configs_all]))>1])
+    for item in ['outdir', 'datadir', 'dataform', 'data_test', 'save_rep']:
+        if item in diff_opts:
+            diff_opts.pop(diff_opts.index(item))
+    labels_long = [', '.join(['%s=%s' % (k,str(configs_all[i][k])) for k in diff_opts]) for i in range(len(sort_key))]
 
+    temp = ""
     with open('%s/configs_sorted%s.txt' % (output_dir, filter_str), 'w') as f:
-        f.write('\n'.join(labels_long))
+        for line in zip(labels,labels_long):
+            temp += '\t'.join(line)
+            temp += '\n'
+        f.write(temp)
+
+    exp_dirs_sorted = [exp_dirs[i] for i in sort_key]
+    temp = ""
+    with open('%s/folders_sorted%s.txt' % (output_dir, filter_str), 'w') as f:
+        for line in zip(labels,exp_dirs_sorted):
+            temp += '\t'.join(line)
+            temp += '\n'
+        f.write(temp)
 
     ''' Compute evaluation summary and store'''
     eval_str = evaluation_summary(results_all, labels, output_dir, binary=False)
@@ -256,6 +306,8 @@ def plot_evaluation_cont(results, configs, output_dir, data_train_path, data_tes
     ''' Plot option correlation '''
     plot_option_correlation(output_dir, diff_opts, results_all, configs_all,
         CORR_CHOICE_SET_CONT, CORR_CRITERION_CONT, filter_str)
+
+    return i_sel
 
 
 def plot_evaluation_bin(results, configs, output_dir, data_train_path, data_test_path, filters=None):
@@ -376,7 +428,7 @@ def plot_cfr_evaluation_bin(results, configs, output_dir):
     print A
 
     ''' Print evaluation results '''
-    results_alphas = [dict([(k1, dict([(k2, v[i,]) for k2,v in results_sel[k1].iteritems()]))
+    resultsalphas = [dict([(k1, dict([(k2, v[i,]) for k2,v in results_sel[k1].iteritems()]))
                         for k1 in results_sel.keys()]) for i in range(len(alphas))]
     di = configs[0]['n_in']
     do = configs[0]['n_out']
@@ -388,7 +440,7 @@ def plot_cfr_evaluation_bin(results, configs, output_dir):
         if i==ia:
             m = ' *'
         labels.append('CFR-%d-%d %s a=%.2g%s' % (di,do,configs[0]['imb_fun'],alphas[i],m))
-    eval_str = evaluation_summary_bin(results_alphas, labels, output_dir)
+    eval_str = evaluation_summary_bin(resultsalphas, labels, output_dir)
     print eval_str
 
     with open('%s/results_summary.txt' % output_dir, 'w') as f:

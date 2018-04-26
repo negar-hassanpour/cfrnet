@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import shutil
 
 from logger import Logger as Log
 
@@ -65,8 +66,36 @@ def load_single_result(result_dir):
 
     return {'train': train_results, 'test': test_results, 'config': config}
 
-def load_results(output_dir):
+def load_single_reps(rep_dir):
+    if Log.VERBOSE:
+        print 'Loading %s...' % rep_dir
 
+    train_path = '%s/reps.npz' % rep_dir
+    test_path = '%s/reps.test.npz' % rep_dir
+
+    has_test = os.path.isfile(test_path)
+
+    try:
+        train_reps = load_result_file(train_path)
+
+    except:
+        'WARNING: Couldnt load reps file. Skipping'
+        return None
+    
+    if has_test:
+        test_reps = load_result_file(test_path)
+    else:
+        test_reps = None
+
+    return {'train': train_reps, 'test': test_reps}
+
+def get_exp_dirs(output_dir):
+    files = ['%s/%s' % (output_dir, f) for f in os.listdir(output_dir)]
+    exp_dirs = [f for f in files if os.path.isdir(f)
+                    if os.path.isfile('%s/result.npz' % f)]
+    return exp_dirs
+
+def load_results(output_dir):
     if Log.VERBOSE:
         print 'Loading results from %s...' % output_dir
 
@@ -77,9 +106,7 @@ def load_results(output_dir):
         pass
 
     # Multiple results
-    files = ['%s/%s' % (output_dir, f) for f in os.listdir(output_dir)]
-    exp_dirs = [f for f in files if os.path.isdir(f)
-                    if os.path.isfile('%s/result.npz' % f)]
+    exp_dirs = get_exp_dirs(output_dir)
 
     if Log.VERBOSE:
         print 'Found %d experiment configurations.' % len(exp_dirs)
@@ -92,6 +119,30 @@ def load_results(output_dir):
             results.append(dir_result)
 
     return results
+
+def del_nan_results(output_dir, del_idx):
+    if len(del_idx) != 0:
+        if Log.VERBOSE:
+            print 'Deleting NaN results from %s...' % output_dir
+
+        ''' Detect results structure '''
+        # Single result
+        if os.path.isfile('%s/results.npz' % output_dir):
+            #@TODO: Implement
+            pass
+
+        # Multiple results
+        files = ['%s/%s' % (output_dir, f) for f in os.listdir(output_dir)]
+        exp_dirs = [f for f in files if os.path.isdir(f)
+                        if os.path.isfile('%s/result.npz' % f)]
+
+        # Delete all NaN result folders
+        for ind, dir in enumerate(exp_dirs):
+            if ind in del_idx:
+                print 'Deleting %d...' % (ind+1)
+                shutil.rmtree(dir)
+
+    return
 
 def load_data(datapath):
     """ Load dataset """
@@ -157,3 +208,30 @@ def load_data(datapath):
             'SPARSE': SPARSE}
 
     return data
+
+def load_reps(output_dir):
+    if Log.VERBOSE:
+        print 'Loading representations from %s...' % output_dir
+
+    ''' Detect results structure '''
+    # Single result
+    if os.path.isfile('%s/reps.npz' % output_dir):
+        # Multiple results
+        files = ['%s/%s' % (output_dir, f) for f in os.listdir(output_dir)]
+        exp_dirs = [f for f in files if os.path.isdir(f)
+                        if os.path.isfile('%s/reps.npz' % f)]
+
+        if Log.VERBOSE:
+            print 'Found %d experiment configurations.' % len(exp_dirs)
+
+        # Load each result folder
+        reps = []
+        for dir in exp_dirs:
+            dir_reps = load_single_reps(dir)
+            if dir_reps is not None:
+                reps.append(dir_reps)
+
+        return reps
+    
+    else:
+        return None

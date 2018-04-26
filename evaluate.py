@@ -8,6 +8,7 @@ Log.VERBOSE = True
 
 import cfr.evaluation as evaluation
 from cfr.plotting import *
+from cfr.loader import get_exp_dirs
 
 def sort_by_config(results, configs, key):
     vals = np.array([cfg[key] for cfg in configs])
@@ -33,19 +34,23 @@ def load_config(config_file):
     return cfg
 
 def evaluate(config_file, overwrite=False, filters=None):
-
     if not os.path.isfile(config_file):
         raise Exception('Could not find config file at path: %s' % config_file)
 
     cfg = load_config(config_file)
 
     output_dir = cfg['outdir']
+    exp_dirs = get_exp_dirs(output_dir)
 
     if not os.path.isdir(output_dir):
         raise Exception('Could not find output at path: %s' % output_dir)
 
-    data_train = cfg['datadir']+'/'+cfg['dataform']
-    data_test = cfg['datadir']+'/'+cfg['data_test']
+    data_path_train = cfg['datadir']+'/'+cfg['dataform']
+    if 'data_test' in cfg.keys():
+        data_path_test = cfg['datadir']+'/'+cfg['data_test']
+    else:
+        data_path_test = None
+    
     binary = False
     if cfg['loss'] == 'log':
         binary = True
@@ -53,10 +58,11 @@ def evaluate(config_file, overwrite=False, filters=None):
     # Evaluate results
     eval_path = '%s/evaluation.npz' % output_dir
     if overwrite or (not os.path.isfile(eval_path)):
-        eval_results, configs = evaluation.evaluate(output_dir,
-                                data_path_train=data_train,
-                                data_path_test=data_test,
+        eval_results, configs, exp_dirs = evaluation.evaluate(output_dir,
+                                data_path_train=data_path_train,
+                                data_path_test=data_path_test,
                                 binary=binary)
+        
         # Save evaluation
         pickle.dump((eval_results, configs), open(eval_path, "wb"))
     else:
@@ -64,15 +70,16 @@ def evaluate(config_file, overwrite=False, filters=None):
             print 'Loading evaluation results from %s...' % eval_path
         # Load evaluation
         eval_results, configs = pickle.load(open(eval_path, "rb"))
-
     # Sort by alpha
     #eval_results, configs = sort_by_config(eval_results, configs, 'p_alpha')
 
     # Print evaluation results
     if binary:
-        plot_evaluation_bin(eval_results, configs, output_dir, data_train, data_test, filters)
+        plot_evaluation_bin(eval_results, configs, output_dir, data_path_train, data_path_test, filters)
     else:
-        plot_evaluation_cont(eval_results, configs, output_dir, data_train, data_test, filters)
+        i_sel = plot_evaluation_cont(eval_results, configs, exp_dirs, output_dir, data_path_train, data_path_test, filters)
+
+    evaluation.pred2csv(cfg, i_sel)
 
     # Plot evaluation
     #if configs[0]['loss'] == 'log':

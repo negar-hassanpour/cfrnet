@@ -56,6 +56,7 @@ tf.app.flags.DEFINE_integer('save_rep', 0, """Save representations after trainin
 tf.app.flags.DEFINE_float('val_part', 0, """Validation part. """)
 tf.app.flags.DEFINE_boolean('split_output', 0, """Whether to split output layers between treated and control. """)
 tf.app.flags.DEFINE_boolean('reweight_sample', 1, """Whether to reweight sample for prediction loss with average treatment probability. """)
+tf.app.flags.DEFINE_string('mode', '0.0', """Original objective function (unweighted). """)
 
 if FLAGS.sparse:
     import scipy.sparse as sparse
@@ -71,8 +72,14 @@ def train(CFR, sess, train_step, D, I_valid, D_test, logfile, i_exp):
 
     ''' Train/validation split '''
     n = D['x'].shape[0]
-    I = range(n); I_train = list(set(I)-set(I_valid))
-    n_train = len(I_train)
+    I = range(n)
+    I_train_all = list(set(I)-set(I_valid))
+    n_train_all = len(I_train_all)
+
+    # ''' handle censored data '''
+    I_censored = [i for i,yf in enumerate(D['yf']) if np.isnan(yf)]
+    I_train = list(set(I_train_all)-set(I_censored))
+    I_valid = list(set(I_valid)-set(I_censored))
 
     ''' Compute treatment probability'''
     p_treated = np.mean(D['t'][I_train,:])
@@ -124,10 +131,10 @@ def train(CFR, sess, train_step, D, I_valid, D_test, logfile, i_exp):
     for i in range(FLAGS.iterations):
 
         ''' Fetch sample '''
-        I = random.sample(range(0, n_train), FLAGS.batch_size)
-        x_batch = D['x'][I_train,:][I,:]
-        t_batch = D['t'][I_train,:][I]
-        y_batch = D['yf'][I_train,:][I]
+        I = random.sample(range(0, n_train_all), FLAGS.batch_size)
+        x_batch = D['x'][I_train_all,:][I,:]
+        t_batch = D['t'][I_train_all,:][I]
+        y_batch = D['yf'][I_train_all,:][I]
 
         if __DEBUG__:
             M = sess.run(cfr.pop_dist(CFR.x, CFR.t), feed_dict={CFR.x: x_batch, CFR.t: t_batch})
@@ -135,14 +142,21 @@ def train(CFR, sess, train_step, D, I_valid, D_test, logfile, i_exp):
 
         ''' Do one step of gradient descent '''
         if not objnan:
-            sess.run(train_step, feed_dict={CFR.x: x_batch, CFR.t: t_batch, \
-                CFR.y_: y_batch, CFR.do_in: FLAGS.dropout_in, CFR.do_out: FLAGS.dropout_out, \
-                CFR.r_alpha: FLAGS.p_alpha, CFR.r_lambda: FLAGS.p_lambda, CFR.p_t: p_treated})
+            ''' handle censored data '''
+            i_uncensored = [ind for ind,yf in enumerate(y_batch) if not np.isnan(yf)]
+            dict_factual_batch = {CFR.x: x_batch[i_uncensored,:], CFR.t: t_batch[i_uncensored], \
+                CFR.y_: y_batch[i_uncensored], CFR.do_in: FLAGS.dropout_in, CFR.do_out: FLAGS.dropout_out, \
+                CFR.r_alpha: FLAGS.p_alpha, CFR.r_lambda: FLAGS.p_lambda, CFR.p_t: p_treated}
+
+            sess.run(train_step, feed_dict=dict_factual_batch)
+            # sample_weight = sess.run(CFR.sample_weight, feed_dict=dict_factual_batch)
 
         ''' Project variable selection weights '''
         if FLAGS.varsel:
             wip = simplex_project(sess.run(CFR.weights_in[0]), 1)
             sess.run(CFR.projection, feed_dict={CFR.w_proj: wip})
+
+            sample_weight = sess.run(CFR.sample_weight, feed_dict=dict_factual_batch)
 
         ''' Compute loss every N iterations '''
         if i % FLAGS.output_delay == 0 or i==FLAGS.iterations-1:
@@ -196,15 +210,15 @@ def train(CFR, sess, train_step, D, I_valid, D_test, logfile, i_exp):
                     CFR.t: 1-D_test['t'], CFR.do_in: 1.0, CFR.do_out: 1.0})
                 preds_test.append(np.concatenate((y_pred_f_test, y_pred_cf_test),axis=1))
 
-            if FLAGS.save_rep and i_exp == 1:
+            if FLAGS.save_rep:# and i_exp == 1:
                 reps_i = sess.run([CFR.h_rep], feed_dict={CFR.x: D['x'], \
                     CFR.do_in: 1.0, CFR.do_out: 0.0})
-                reps.append(reps_i)
+                reps.append(reps_i[0][:,:])
 
                 if D_test is not None:
                     reps_test_i = sess.run([CFR.h_rep], feed_dict={CFR.x: D_test['x'], \
                         CFR.do_in: 1.0, CFR.do_out: 0.0})
-                    reps_test.append(reps_test_i)
+                    reps_test.append(reps_test_i[0][:,:])
 
     return losses, preds_train, preds_test, reps, reps_test
 
@@ -240,17 +254,17 @@ def run(outdir):
     log(logfile, 'Training with hyperparameters: alpha=%.2g, lambda=%.2g' % (FLAGS.p_alpha,FLAGS.p_lambda))
 
     ''' Load Data '''
-    npz_input = False
-    if dataform[-3:] == 'npz':
-        npz_input = True
-    if npz_input:
-        datapath = dataform
-        if has_test:
-            datapath_test = dataform_test
-    else:
-        datapath = dataform % 1
-        if has_test:
-            datapath_test = dataform_test % 1
+    # npz_input = False
+    # if dataform[-3:] == 'npz':
+    #     npz_input = True
+    # if npz_input:
+    #     datapath = dataform
+    #     if has_test:
+    #         datapath_test = dataform_test
+    # else:
+    datapath = dataform #% 1
+    if has_test:
+        datapath_test = dataform_test #% 1
 
     log(logfile,     'Training data: ' + datapath)
     if has_test:
@@ -294,6 +308,8 @@ def run(outdir):
         opt = tf.train.GradientDescentOptimizer(lr)
     elif FLAGS.optimizer == 'Adam':
         opt = tf.train.AdamOptimizer(lr)
+    elif FLAGS.optimizer == 'MomentumOptimizer':
+        opt = tf.train.MomentumOptimizer(lr)
     else:
         opt = tf.train.RMSPropOptimizer(lr, FLAGS.decay)
 
@@ -309,6 +325,8 @@ def run(outdir):
     all_preds_train = []
     all_preds_test = []
     all_valid = []
+    all_reps = []
+    all_reps_test = []
     if FLAGS.varsel:
         all_weights = None
         all_beta = None
@@ -335,31 +353,31 @@ def run(outdir):
 
         if i_exp==1 or FLAGS.experiments>1:
             D_exp_test = None
-            if npz_input:
-                D_exp = {}
-                D_exp['x']  = D['x'][:,:,i_exp-1]
-                D_exp['t']  = D['t'][:,i_exp-1:i_exp]
-                D_exp['yf'] = D['yf'][:,i_exp-1:i_exp]
-                if D['HAVE_TRUTH']:
-                    D_exp['ycf'] = D['ycf'][:,i_exp-1:i_exp]
-                else:
-                    D_exp['ycf'] = None
-
-                if has_test:
-                    D_exp_test = {}
-                    D_exp_test['x']  = D_test['x'][:,:,i_exp-1]
-                    D_exp_test['t']  = D_test['t'][:,i_exp-1:i_exp]
-                    D_exp_test['yf'] = D_test['yf'][:,i_exp-1:i_exp]
-                    if D_test['HAVE_TRUTH']:
-                        D_exp_test['ycf'] = D_test['ycf'][:,i_exp-1:i_exp]
-                    else:
-                        D_exp_test['ycf'] = None
+            # if npz_input:
+            D_exp = {}
+            D_exp['x']  = D['x'][:,:,i_exp-1]
+            D_exp['t']  = D['t'][:,i_exp-1:i_exp]
+            D_exp['yf'] = D['yf'][:,i_exp-1:i_exp]
+            if D['HAVE_TRUTH']:
+                D_exp['ycf'] = D['ycf'][:,i_exp-1:i_exp]
             else:
-                datapath = dataform % i_exp
-                D_exp = load_data(datapath)
-                if has_test:
-                    datapath_test = dataform_test % i_exp
-                    D_exp_test = load_data(datapath_test)
+                D_exp['ycf'] = None
+
+            if has_test:
+                D_exp_test = {}
+                D_exp_test['x']  = D_test['x'][:,:,i_exp-1]
+                D_exp_test['t']  = D_test['t'][:,i_exp-1:i_exp]
+                D_exp_test['yf'] = D_test['yf'][:,i_exp-1:i_exp]
+                if D_test['HAVE_TRUTH']:
+                    D_exp_test['ycf'] = D_test['ycf'][:,i_exp-1:i_exp]
+                else:
+                    D_exp_test['ycf'] = None
+            # else:
+            #     datapath = dataform % i_exp
+            #     D_exp = load_data(datapath)
+            #     if has_test:
+            #         datapath_test = dataform_test % i_exp
+            #         D_exp_test = load_data(datapath_test)
 
             D_exp['HAVE_TRUTH'] = D['HAVE_TRUTH']
             if has_test:
@@ -377,11 +395,11 @@ def run(outdir):
         all_preds_train.append(preds_train)
         all_preds_test.append(preds_test)
         all_losses.append(losses)
-
         ''' Fix shape for output (n_units, dim, n_reps, n_outputs) '''
         out_preds_train = np.swapaxes(np.swapaxes(all_preds_train,1,3),0,2)
         if  has_test:
             out_preds_test = np.swapaxes(np.swapaxes(all_preds_test,1,3),0,2)
+        
         out_losses = np.swapaxes(np.swapaxes(all_losses,0,2),0,1)
 
         ''' Store predictions '''
@@ -411,11 +429,17 @@ def run(outdir):
             np.savez(npzfile_test, pred=out_preds_test)
 
         ''' Save representations '''
-        if FLAGS.save_rep and i_exp == 1:
-            np.savez(repfile, rep=reps)
+        if FLAGS.save_rep:# and i_exp == 1:
+            all_reps.append(reps)
+            all_reps_test.append(reps_test)
 
+            out_reps = np.swapaxes(np.swapaxes(all_reps,1,3),0,2)
+            if  has_test:
+                out_reps_test = np.swapaxes(np.swapaxes(all_reps_test,1,3),0,2)
+        
+            np.savez(repfile, rep=out_reps)
             if has_test:
-                np.savez(repfile_test, rep=reps_test)
+                np.savez(repfile_test, rep=out_reps_test)
 
 def main(argv=None):  # pylint: disable=unused-argument
     """ Main entry point """

@@ -1,5 +1,7 @@
 import tensorflow as tf
 import numpy as np
+import csv
+import os
 
 SQRT_CONST = 1e-10
 
@@ -35,6 +37,44 @@ def save_config(fname):
     f.write(s)
     f.close()
 
+# def load_data_dict(data_dir):
+#     data = {}
+#     with open(data_dir, 'rb') as csvfile:
+#         file_reader = csv.reader(csvfile)
+#         for idx, row in enumerate(file_reader):
+#             if idx:     # skip the header
+#                 data[row[0]] = [float(item) for i,item in enumerate(row) if i!=0] 
+#     return data
+
+def load_data_dict(data_dir):
+    data = {}
+    c = 0
+    with open(data_dir, 'rb') as csvfile:
+        file_reader = csv.reader(csvfile)
+        for idx, row in enumerate(file_reader):
+            if idx:     # skip the header
+                data[row[0]] = []
+                for i,item in enumerate(row):
+                    if i != 0:  # skip the sample_id
+                        if item != '':
+                            data[row[0]].append(float(item))
+                        else:
+                            data[row[0]].append(np.nan)
+                            c += 1
+    # print c
+    return data
+
+def extract_data(x_dict, data):
+    x = []
+    v1 = []
+    v2 = []
+    for key in data.keys():
+        x.append(x_dict[key])
+        v1.append(data[key][0])
+        v2.append(data[key][1])
+    IDs = [int(id) for id in data.keys()]
+    return np.asarray(IDs)[:,None], np.asarray(x)[:,:,None], np.asarray(v1)[:,None], np.asarray(v2)[:,None]
+
 def load_data(fname):
     """ Load data set """
     if fname[-3:] == 'npz':
@@ -44,18 +84,39 @@ def load_data(fname):
             data['ycf'] = data_in['ycf']
         except:
             data['ycf'] = None
-    else:
-        if FLAGS.sparse>0:
-            data_in = np.loadtxt(open(fname+'.y',"rb"),delimiter=",")
-            x = load_sparse(fname+'.x')
-        else:
-            data_in = np.loadtxt(open(fname,"rb"),delimiter=",")
-            x = data_in[:,5:]
+    
+    else:#if fname[-3:] == 'csv':
+        data = {}
 
-        data['x'] = x
-        data['t'] = data_in[:,0:1]
-        data['yf'] = data_in[:,1:2]
-        data['ycf'] = data_in[:,2:3]
+        x_dict = load_data_dict('data/x.csv')
+
+        data_dict = load_data_dict(fname+'.csv')
+        data['id'], data['x'], data['t'], data['yf'] = extract_data(x_dict, data_dict)
+
+        if os.path.isfile(fname+'_cf'+'.csv'):
+            data_dict = load_data_dict(fname+'_cf'+'.csv')
+            _, _, data['mu0'], data['mu1'] = extract_data(x_dict, data_dict)
+            
+            import copy
+            data['ycf'] = copy.copy(data['mu0'])
+            for i,t in enumerate(data['t']):
+                if t == 0:
+                    data['ycf'][i] = data['mu1'][i]
+        else:
+            data['ycf'] = None
+
+    # else:
+    #     if FLAGS.sparse>0:
+    #         data_in = np.loadtxt(open(fname+'.y',"rb"),delimiter=",")
+    #         x = load_sparse(fname+'.x')
+    #     else:
+    #         data_in = np.loadtxt(open(fname,"rb"),delimiter=",")
+    #         x = data_in[:,5:]
+
+    #     data['x'] = x
+    #     data['t'] = data_in[:,0:1]
+    #     data['yf'] = data_in[:,1:2]
+    #     data['ycf'] = data_in[:,2:3]
 
     data['HAVE_TRUTH'] = not data['ycf'] is None
 
@@ -186,10 +247,12 @@ def wasserstein(X,t,p,lam=10,its=10,sq=False,backpropT=False):
     eff_lam = tf.stop_gradient(lam/M_mean)
 
     ''' Compute new distance matrix '''
-    Mt = M
+    # Mt = M
     row = delta*tf.ones(tf.shape(M[0:1,:]))
     col = tf.concat(0,[delta*tf.ones(tf.shape(M[:,0:1])),tf.zeros((1,1))])
     Mt = tf.concat(0,[M,row])
+    # print((Mt),(col))
+    # exit()
     Mt = tf.concat(1,[Mt,col])
 
     ''' Compute marginal vectors '''

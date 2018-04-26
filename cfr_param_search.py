@@ -26,6 +26,13 @@ def sample_config(configs):
         cfg_sample[k] = opts[c]
     return cfg_sample
 
+def list_configs(configs):
+    from sklearn.model_selection import ParameterGrid
+    param_grid = {}
+    for k in configs.keys():
+        param_grid[k] = configs[k]
+    return list(ParameterGrid(param_grid))
+
 def cfg_string(cfg):
     ks = sorted(cfg.keys())
     cfg_str = ','.join(['%s:%s' % (k, str(cfg[k])) for k in ks])
@@ -49,7 +56,7 @@ def save_used_cfg(cfg, used_cfg_file):
         cfg_str = cfg_string(cfg)
         f.write('%s\n' % cfg_str)
 
-def run(cfg_file, num_runs):
+def run(cfg_file, mode):
     configs = load_config(cfg_file)
 
     outdir = configs['outdir'][0]
@@ -59,24 +66,25 @@ def run(cfg_file, num_runs):
         f = open(used_cfg_file, 'w')
         f.close()
 
-    for i in range(num_runs):
-        cfg = sample_config(configs)
+    cfgs_list = list_configs(configs)
+    for i, cfg in enumerate(cfgs_list):
         if is_used_cfg(cfg, used_cfg_file):
             print 'Configuration used, skipping'
             continue
 
-        save_used_cfg(cfg, used_cfg_file)
-
         print '------------------------------'
-        print 'Run %d of %d:' % (i+1, num_runs)
+        print 'Run %d of %d:' % (i+1, len(cfgs_list))
         print '------------------------------'
         print '\n'.join(['%s: %s' % (str(k), str(v)) for k,v in cfg.iteritems() if len(configs[k])>1])
+        sys.stdout.flush()
 
         flags = ' '.join('--%s %s' % (k,str(v)) for k,v in cfg.iteritems())
-        call('python cfr_net_'+cfg['mode']+'train.py %s' % flags, shell=True)
+        call('python cfr_net'+mode+'train.py %s' % flags, shell=True)
+        save_used_cfg(cfg, used_cfg_file)
+
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print 'Usage: python cfr_param_search.py <config file> <num runs>'
+    if len(sys.argv) < 2:
+        print 'Usage: python cfr_param_search.py <config file> <mode:( _ , _weighted_ )>'
     else:
-        run(sys.argv[1], int(sys.argv[2]))
+	    run(sys.argv[1], sys.argv[2])
